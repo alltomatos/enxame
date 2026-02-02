@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay
+  namespace: enxame
+  labels:
+    app.kubernetes.io/name: relay
+    app.kubernetes.io/component: relay
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: relay
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: relay
+    spec:
+      containers:
+        - name: relay
+          image: alltomatos/enxame-relay:latest
+          imagePullPolicy: Always
+          ports:
+            - name: grpc
+              containerPort: 50052
+              protocol: TCP
+          env:
+            - name: CORE_ADDRESS
+              value: "core-server:50051"
+            - name: RELAY_PORT
+              value: "50052"
+            - name: RELAY_REGION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['topology.kubernetes.io/zone']
+            - name: RELAY_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: PRIVATE_KEY_PATH
+              value: "/data/relay.key"
+            - name: HEARTBEAT_INTERVAL
+              value: "30"
+          volumeMounts:
+            - name: keys
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["test", "-f", "/data/relay.key"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/data/relay.key"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: keys
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: relay
+                topologyKey: kubernetes.io/hostname

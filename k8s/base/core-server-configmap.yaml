@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: core-server-config
+  namespace: enxame
+data:
+  GRPC_PORT: "50051"
+  ENVIRONMENT: "production"
+  HEARTBEAT_TTL: "60s"
+  MAX_RELAYS_PER_RESPONSE: "10"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "enxame"
+  POSTGRES_SSL: "disable"
+  POSTGRES_POOL_SIZE: "25"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_POOL_SIZE: "50"
