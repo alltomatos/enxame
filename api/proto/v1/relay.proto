@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package relay.v1;
+
+option go_package = "github.com/goautomatik/core-server/pkg/pb/v1;pbv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// RELAY SERVICE - Message Relay for NAT Traversal
+// ============================================================================
+
+service RelayService {
+  // Stream bidirecional para troca de mensagens cifradas entre nós
+  // Cada nó mantém uma conexão persistente com o Relay
+  rpc StreamMessages(stream Envelope) returns (stream Envelope);
+  
+  // Registra um nó neste Relay específico (diferente do Core Server)
+  rpc ConnectToRelay(ConnectRequest) returns (ConnectResponse);
+  
+  // Verifica se um nó está conectado a este Relay
+  rpc IsNodeConnected(NodeQueryRequest) returns (NodeQueryResponse);
+}
+
+// ============================================================================
+// ENVELOPE - Mensagem cifrada encapsulada
+// ============================================================================
+
+// Envelope representa uma mensagem cifrada que o Relay encaminha sem ler
+message Envelope {
+  // ID único da mensagem
+  string message_id = 1;
+  
+  // NodeID do remetente
+  string sender_node_id = 2;
+  
+  // NodeID do destinatário
+  string target_node_id = 3;
+  
+  // Payload cifrado (E2E encrypted - o Relay não pode ler)
+  // Contém a mensagem real serializada
+  bytes encrypted_payload = 4;
+  
+  // Nonce/IV usado na criptografia (para replay protection)
+  bytes nonce = 5;
+  
+  // Assinatura do remetente sobre (message_id + target_node_id + hash(payload))
+  bytes sender_signature = 6;
+  
+  // Timestamp da mensagem
+  google.protobuf.Timestamp timestamp = 7;
+  
+  // Tipo de mensagem (para roteamento sem ler conteúdo)
+  MessageType message_type = 8;
+  
+  // TTL em segundos (mensagem expira após esse tempo)
+  int32 ttl_seconds = 9;
+  
+  // Prioridade (para QoS)
+  Priority priority = 10;
+}
+
+// Tipos de mensagem (para roteamento eficiente)
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_CHAT = 1;           // Mensagem de chat
+  MESSAGE_TYPE_FILE_CHUNK = 2;     // Chunk de arquivo
+  MESSAGE_TYPE_SIGNALING = 3;      // ICE/SDP para WebRTC
+  MESSAGE_TYPE_PRESENCE = 4;       // Atualização de presença
+  MESSAGE_TYPE_ACK = 5;            // Confirmação de recebimento
+  MESSAGE_TYPE_CONTROL = 6;        // Mensagem de controle
+}
+
+// Prioridades de mensagem
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_NORMAL = 2;
+  PRIORITY_HIGH = 3;
+  PRIORITY_URGENT = 4;
+}
+
+// ============================================================================
+// CONNECT TO RELAY
+// ============================================================================
+
+message ConnectRequest {
+  // Identidade completa do nó
+  string node_id = 1;
+  bytes public_key = 2;
+  bytes signature = 3;  // Assinatura do node_id
+  
+  // Capacidades do nó
+  repeated string capabilities = 4;
+}
+
+message ConnectResponse {
+  bool success = 1;
+  string message = 2;
+  
+  // ID da sessão neste Relay
+  string session_id = 3;
+  
+  // Lista de nós atualmente conectados (opcional, para discovery local)
+  repeated string connected_node_ids = 4;
+}
+
+// ============================================================================
+// NODE QUERY
+// ============================================================================
+
+message NodeQueryRequest {
+  string node_id = 1;
+}
+
+message NodeQueryResponse {
+  bool connected = 1;
+  google.protobuf.Timestamp last_activity = 2;
+}
+
+// ============================================================================
+// DELIVERY STATUS
+// ============================================================================
+
+// Resposta de entrega (enviada de volta ao remetente)
+message DeliveryReceipt {
+  string message_id = 1;
+  DeliveryStatus status = 2;
+  string error_message = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+enum DeliveryStatus {
+  DELIVERY_STATUS_UNSPECIFIED = 0;
+  DELIVERY_STATUS_DELIVERED = 1;     // Entregue ao destinatário
+  DELIVERY_STATUS_QUEUED = 2;        // Na fila (destinatário offline)
+  DELIVERY_STATUS_FAILED = 3;        // Falha na entrega
+  DELIVERY_STATUS_REJECTED = 4;      // Rejeitado (remetente banido)
+  DELIVERY_STATUS_EXPIRED = 5;       // TTL expirou
+}
