@@ -1,0 +1,81 @@
+services:
+  core-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: core-server
+    ports:
+      - "50051:50051"
+    environment:
+      - GRPC_PORT=50051
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=core
+      - POSTGRES_PASSWORD=core_secret
+      - POSTGRES_DB=core_network
+      - POSTGRES_SSL=disable
+      - POSTGRES_POOL_SIZE=25
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - REDIS_POOL_SIZE=100
+      - HEARTBEAT_INTERVAL=30s
+      - HEARTBEAT_TTL=60s
+      - MAX_RELAYS_PER_RESPONSE=10
+      - MASTER_PUBLIC_KEYS=
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - core-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: core-postgres
+    environment:
+      POSTGRES_USER: core
+      POSTGRES_PASSWORD: core_secret
+      POSTGRES_DB: core_network
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core -d core_network"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - core-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: core-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - core-network
+    restart: unless-stopped
+
+networks:
+  core-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

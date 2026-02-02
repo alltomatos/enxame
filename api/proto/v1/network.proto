@@ -1,0 +1,287 @@
+syntax = "proto3";
+
+package network.v1;
+
+option go_package = "github.com/goautomatik/core-server/pkg/pb/v1;pbv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// NETWORK SERVICE - Core P2P Network Orchestration
+// ============================================================================
+
+service NetworkService {
+  // Registra um nó na rede (Desktop Client ou Relay Server)
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  
+  // Heartbeat para manter presença ativa (renova TTL no Redis)
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // Retorna lista de Relay Servers ativos para NAT Traversal
+  rpc GetActiveRelays(GetActiveRelaysRequest) returns (GetActiveRelaysResponse);
+  
+  // Stream de eventos globais de moderação (banimentos, alertas)
+  rpc SubscribeToGlobalEvents(SubscribeRequest) returns (stream GlobalEvent);
+}
+
+// ============================================================================
+// NODE TYPES & IDENTITY
+// ============================================================================
+
+// Tipo do nó na rede
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;
+  NODE_TYPE_DESKTOP = 1;      // Cliente desktop P2P (participa do grid computing)
+  NODE_TYPE_RELAY = 2;        // Servidor relay da comunidade (NAT Traversal + cache)
+  NODE_TYPE_MOBILE = 3;       // Cliente mobile (consumo apenas)
+  NODE_TYPE_WEB = 4;          // Cliente web (consumo apenas)
+}
+
+// Status do nó
+enum NodeStatus {
+  NODE_STATUS_UNSPECIFIED = 0;
+  NODE_STATUS_ONLINE = 1;
+  NODE_STATUS_AWAY = 2;
+  NODE_STATUS_BUSY = 3;
+  NODE_STATUS_OFFLINE = 4;
+}
+
+// Identidade do nó baseada em chave pública Ed25519
+message NodeIdentity {
+  // ID único derivado da chave pública (hex-encoded SHA256 dos primeiros 16 bytes)
+  string node_id = 1;
+  
+  // Chave pública Ed25519 (32 bytes, base64-encoded)
+  bytes public_key = 2;
+  
+  // Assinatura do node_id pela chave privada (prova de posse)
+  bytes signature = 3;
+}
+
+// Informações completas do nó
+message NodeInfo {
+  NodeIdentity identity = 1;
+  NodeType type = 2;
+  NodeStatus status = 3;
+  
+  // Endpoints para conexão direta (pode ter múltiplos para IPv4/IPv6)
+  repeated string endpoints = 4;
+  
+  // Versão do cliente
+  string version = 5;
+  
+  // Capacidades especiais (e.g., "relay", "storage", "compute")
+  repeated string capabilities = 6;
+  
+  // Região geográfica (para otimização de latência)
+  string region = 7;
+  
+  // Timestamp de registro
+  google.protobuf.Timestamp registered_at = 8;
+  
+  // Último heartbeat recebido
+  google.protobuf.Timestamp last_seen = 9;
+}
+
+// ============================================================================
+// REGISTER NODE
+// ============================================================================
+
+message RegisterNodeRequest {
+  NodeIdentity identity = 1;
+  NodeType type = 2;
+  repeated string endpoints = 3;
+  string version = 4;
+  repeated string capabilities = 5;
+  string region = 6;
+}
+
+message RegisterNodeResponse {
+  bool success = 1;
+  string message = 2;
+  
+  // TTL em segundos para o próximo heartbeat
+  int32 heartbeat_interval_seconds = 3;
+  
+  // Lista inicial de relays sugeridos para o nó
+  repeated NodeInfo suggested_relays = 4;
+}
+
+// ============================================================================
+// HEARTBEAT
+// ============================================================================
+
+message HeartbeatRequest {
+  string node_id = 1;
+  
+  // Assinatura do timestamp atual pela chave privada do nó
+  bytes signature = 2;
+  
+  // Status atual do nó
+  NodeStatus status = 3;
+  
+  // Métricas opcionais de saúde
+  NodeMetrics metrics = 4;
+}
+
+message NodeMetrics {
+  // Uso de CPU (0-100)
+  float cpu_usage = 1;
+  
+  // Uso de memória (0-100)
+  float memory_usage = 2;
+  
+  // Número de conexões P2P ativas
+  int32 active_connections = 3;
+  
+  // Bandwidth disponível em Mbps
+  float available_bandwidth_mbps = 4;
+  
+  // Latência média para o Core Server em ms
+  int32 latency_ms = 5;
+}
+
+message HeartbeatResponse {
+  bool success = 1;
+  
+  // Próximo intervalo de heartbeat (pode ser ajustado dinamicamente)
+  int32 next_heartbeat_seconds = 2;
+  
+  // Comandos pendentes para o nó (e.g., reconectar a outro relay)
+  repeated NodeCommand pending_commands = 3;
+}
+
+message NodeCommand {
+  string command_id = 1;
+  string command_type = 2;  // "reconnect", "update", "migrate"
+  bytes payload = 3;        // JSON serializado com parâmetros do comando
+}
+
+// ============================================================================
+// GET ACTIVE RELAYS
+// ============================================================================
+
+message GetActiveRelaysRequest {
+  // Região preferida (opcional, para otimização de latência)
+  string preferred_region = 1;
+  
+  // Número máximo de relays a retornar
+  int32 limit = 2;
+  
+  // IDs de relays a excluir (e.g., relays que já falharam)
+  repeated string exclude_node_ids = 3;
+}
+
+message GetActiveRelaysResponse {
+  repeated NodeInfo relays = 1;
+  
+  // Timestamp da última atualização da lista
+  google.protobuf.Timestamp updated_at = 2;
+}
+
+// ============================================================================
+// GLOBAL EVENTS (MODERATION)
+// ============================================================================
+
+message SubscribeRequest {
+  string node_id = 1;
+  
+  // Tipos de eventos para filtrar (vazio = todos)
+  repeated EventType event_types = 2;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_NODE_BANNED = 1;         // Nó banido da rede
+  EVENT_TYPE_CONTENT_BANNED = 2;      // Conteúdo específico banido
+  EVENT_TYPE_GLOBAL_ALERT = 3;        // Alerta global (manutenção, etc.)
+  EVENT_TYPE_RELAY_OFFLINE = 4;       // Relay ficou offline
+  EVENT_TYPE_NETWORK_UPDATE = 5;      // Atualização de configuração da rede
+}
+
+message GlobalEvent {
+  string event_id = 1;
+  EventType type = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  
+  // Payload específico do evento
+  oneof payload {
+    NodeBannedEvent node_banned = 10;
+    ContentBannedEvent content_banned = 11;
+    GlobalAlertEvent global_alert = 12;
+    RelayOfflineEvent relay_offline = 13;
+    NetworkUpdateEvent network_update = 14;
+  }
+  
+  // Assinatura do moderador global que originou o evento
+  ModeratorSignature moderator_signature = 20;
+}
+
+// ============================================================================
+// MODERATION EVENTS PAYLOADS
+// ============================================================================
+
+message NodeBannedEvent {
+  string banned_node_id = 1;
+  string reason = 2;
+  
+  // Duração do ban em segundos (0 = permanente)
+  int64 duration_seconds = 3;
+  
+  // Hash do conteúdo que motivou o ban (para referência)
+  string evidence_hash = 4;
+}
+
+message ContentBannedEvent {
+  // Hash do conteúdo banido (SHA256)
+  string content_hash = 1;
+  string reason = 2;
+  
+  // Categoria do conteúdo (para filtragem)
+  string category = 3;
+}
+
+message GlobalAlertEvent {
+  string title = 1;
+  string message = 2;
+  
+  // Nível de severidade (info, warning, critical)
+  string severity = 3;
+  
+  // URL opcional com mais informações
+  string info_url = 4;
+}
+
+message RelayOfflineEvent {
+  string relay_node_id = 1;
+  string reason = 2;
+  
+  // Relays alternativos sugeridos
+  repeated string alternative_relay_ids = 3;
+}
+
+message NetworkUpdateEvent {
+  string update_type = 1;  // "config", "protocol", "feature"
+  bytes payload = 2;       // JSON serializado
+  
+  // Indica se requer reinício do cliente
+  bool requires_restart = 3;
+}
+
+// ============================================================================
+// MODERATOR SIGNATURE (GLOBAL MODERATION)
+// ============================================================================
+
+message ModeratorSignature {
+  // ID do moderador (derivado da chave pública)
+  string moderator_id = 1;
+  
+  // Chave pública do moderador (deve estar na lista de chaves mestres)
+  bytes public_key = 2;
+  
+  // Assinatura Ed25519 do evento serializado (sem este campo)
+  bytes signature = 3;
+  
+  // Timestamp da assinatura
+  google.protobuf.Timestamp signed_at = 4;
+}
