@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -150,6 +151,7 @@ func (m *NodeManager) GetNode(ctx context.Context, nodeID string) (*domain.Node,
 }
 
 // GetActiveRelays retorna os relays ativos, opcionalmente filtrados por região
+// Usa shuffle para distribuir carga de forma aleatória
 func (m *NodeManager) GetActiveRelays(ctx context.Context, preferredRegion string, limit int, excludeIDs []string) ([]*domain.Node, error) {
 	// Cria um set de IDs a excluir para busca rápida
 	excludeSet := make(map[string]bool)
@@ -163,7 +165,6 @@ func (m *NodeManager) GetActiveRelays(ctx context.Context, preferredRegion strin
 		return nil, fmt.Errorf("failed to get relay keys: %w", err)
 	}
 
-	var relays []*domain.Node
 	preferredRelays := make([]*domain.Node, 0)
 	otherRelays := make([]*domain.Node, 0)
 
@@ -190,7 +191,12 @@ func (m *NodeManager) GetActiveRelays(ctx context.Context, preferredRegion strin
 		}
 	}
 
-	// Prioriza relays da região preferida
+	// Shuffle para distribuir carga de forma aleatória
+	shuffleRelays(preferredRelays)
+	shuffleRelays(otherRelays)
+
+	// Prioriza relays da região preferida, depois outros (ambos shuffled)
+	var relays []*domain.Node
 	relays = append(relays, preferredRelays...)
 	relays = append(relays, otherRelays...)
 
@@ -200,6 +206,13 @@ func (m *NodeManager) GetActiveRelays(ctx context.Context, preferredRegion strin
 	}
 
 	return relays, nil
+}
+
+// shuffleRelays embaralha a lista de relays para balanceamento de carga
+func shuffleRelays(relays []*domain.Node) {
+	rand.Shuffle(len(relays), func(i, j int) {
+		relays[i], relays[j] = relays[j], relays[i]
+	})
 }
 
 // RemoveNode remove um nó do Redis

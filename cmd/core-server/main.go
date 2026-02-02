@@ -86,8 +86,11 @@ func main() {
 	// Inicializa interceptor de autenticação
 	authInterceptor := server.NewAuthInterceptor(verifier)
 
+	// Inicializa verificador de saúde (K8s Health Check)
+	healthChecker := server.NewHealthChecker(redisManager, pgRepo)
+
 	// Inicializa e inicia o servidor gRPC
-	grpcServer := server.NewGRPCServer(cfg, nodeService, modService, authInterceptor)
+	grpcServer := server.NewGRPCServer(cfg, nodeService, modService, authInterceptor, healthChecker)
 
 	// Canal para capturar sinais de shutdown
 	sigChan := make(chan os.Signal, 1)

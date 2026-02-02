@@ -14,6 +14,7 @@ import (
 	"github.com/goautomatik/core-server/internal/domain"
 	"github.com/goautomatik/core-server/internal/service"
 	pbv1 "github.com/goautomatik/core-server/pkg/pb/v1"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 // GRPCServer implementa o NetworkServiceServer
@@ -25,6 +26,7 @@ type GRPCServer struct {
 	modService      *service.ModerationService
 	grpcServer      *grpc.Server
 	authInterceptor *AuthInterceptor
+	healthChecker   *HealthChecker
 
 	// Gerenciamento de streams ativos com sharding
 	streamManager *StreamManager
@@ -36,12 +38,14 @@ func NewGRPCServer(
 	nodeService *service.NodeService,
 	modService *service.ModerationService,
 	authInterceptor *AuthInterceptor,
+	healthChecker *HealthChecker,
 ) *GRPCServer {
 	return &GRPCServer{
 		cfg:             cfg,
 		nodeService:     nodeService,
 		modService:      modService,
 		authInterceptor: authInterceptor,
+		healthChecker:   healthChecker,
 		streamManager:   NewStreamManager(100), // Buffer de 100 eventos por stream
 	}
 }
@@ -84,6 +88,12 @@ func (s *GRPCServer) Start(port string) error {
 	s.grpcServer = grpc.NewServer(opts...)
 	pbv1.RegisterNetworkServiceServer(s.grpcServer, s)
 
+	// Registra Health Check (K8s liveness/readiness)
+	if s.healthChecker != nil {
+		healthpb.RegisterHealthServer(s.grpcServer, s.healthChecker.GetHealthServer())
+		go s.startHealthCheckLoop()
+	}
+
 	log.Printf("gRPC server starting on port %s", port)
 
 	// Inicia goroutine para propagar eventos de moderação
@@ -100,6 +110,20 @@ func (s *GRPCServer) Stop() {
 
 	// Fecha todos os streams ativos (StreamManager lida com isso)
 	// O StreamManager não precisa de reset, as goroutines tratam o fechamento
+}
+
+// startHealthCheckLoop executa verificações de saúde periódicas
+func (s *GRPCServer) startHealthCheckLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	ctx := context.Background()
+
+	for range ticker.C {
+		if err := s.healthChecker.Check(ctx); err != nil {
+			log.Printf("[Health] Check failed: %v", err)
+		}
+	}
 }
 
 // RegisterNode implementa o RPC de registro de nó
