@@ -70,6 +70,30 @@ func (r *NodeRepository) CreateTables(ctx context.Context) error {
 			moderator_id VARCHAR(64) REFERENCES global_moderators(moderator_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_content_bans_category ON content_bans(category)`,
+
+		`CREATE TABLE IF NOT EXISTS governance_audit_log (
+			log_id SERIAL PRIMARY KEY,
+			timestamp BIGINT NOT NULL,
+			requester_id VARCHAR(64) NOT NULL,
+			action VARCHAR(32) NOT NULL,
+			target_id VARCHAR(64) NOT NULL,
+			channel_id VARCHAR(64),
+			signature BYTEA NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gov_log_requester ON governance_audit_log(requester_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_gov_log_channel ON governance_audit_log(channel_id)`,
+
+		// Cluster Peers (High Availability)
+		`CREATE TABLE IF NOT EXISTS cluster_peers (
+			peer_id VARCHAR(64) PRIMARY KEY,
+			address VARCHAR(256) NOT NULL,
+			public_key BYTEA NOT NULL,
+			status VARCHAR(16) DEFAULT 'pending',
+			last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_cluster_peers_status ON cluster_peers(status)`,
 	}
 
 	for _, query := range queries {
@@ -310,4 +334,101 @@ func (r *NodeRepository) AddModerator(ctx context.Context, mod *domain.GlobalMod
 // Ping verifica a conectividade com o PostgreSQL
 func (r *NodeRepository) Ping(ctx context.Context) error {
 	return r.pool.Ping(ctx)
+}
+
+// LogGovernanceAction registra uma ação de governança auditada
+func (r *NodeRepository) LogGovernanceAction(ctx context.Context, requesterID, action, targetID, channelID string, signature []byte) error {
+	query := `
+		INSERT INTO governance_audit_log (timestamp, requester_id, action, target_id, channel_id, signature)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := r.pool.Exec(ctx, query, time.Now().UnixNano(), requesterID, action, targetID, channelID, signature)
+	return err
+}
+
+// -- Cluster Peers (High Availability) --
+
+// ClusterPeer representa um peer do cluster
+type ClusterPeer struct {
+	PeerID    string
+	Address   string
+	PublicKey []byte
+	Status    string // 'pending', 'active'
+	LastSeen  time.Time
+}
+
+// UpsertClusterPeer insere ou atualiza um peer do cluster
+func (r *NodeRepository) UpsertClusterPeer(ctx context.Context, peer *ClusterPeer) error {
+	query := `
+		INSERT INTO cluster_peers (peer_id, address, public_key, status, last_seen)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (peer_id) DO UPDATE SET
+			address = EXCLUDED.address,
+			public_key = EXCLUDED.public_key,
+			status = EXCLUDED.status,
+			last_seen = EXCLUDED.last_seen
+	`
+	_, err := r.pool.Exec(ctx, query, peer.PeerID, peer.Address, peer.PublicKey, peer.Status, peer.LastSeen)
+	return err
+}
+
+// GetClusterPeer obtém um peer pelo ID
+func (r *NodeRepository) GetClusterPeer(ctx context.Context, peerID string) (*ClusterPeer, error) {
+	query := `SELECT peer_id, address, public_key, status, last_seen FROM cluster_peers WHERE peer_id = $1`
+	var peer ClusterPeer
+	err := r.pool.QueryRow(ctx, query, peerID).Scan(&peer.PeerID, &peer.Address, &peer.PublicKey, &peer.Status, &peer.LastSeen)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &peer, nil
+}
+
+// GetActiveClusterPeers retorna todos os peers ativos
+func (r *NodeRepository) GetActiveClusterPeers(ctx context.Context) ([]*ClusterPeer, error) {
+	query := `SELECT peer_id, address, public_key, status, last_seen FROM cluster_peers WHERE status = 'active'`
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var peers []*ClusterPeer
+	for rows.Next() {
+		var p ClusterPeer
+		if err := rows.Scan(&p.PeerID, &p.Address, &p.PublicKey, &p.Status, &p.LastSeen); err != nil {
+			return nil, err
+		}
+		peers = append(peers, &p)
+	}
+	return peers, nil
+}
+
+// UpdateClusterPeerStatus atualiza o status de um peer
+func (r *NodeRepository) UpdateClusterPeerStatus(ctx context.Context, peerID, status string) error {
+	query := `UPDATE cluster_peers SET status = $2, last_seen = NOW() WHERE peer_id = $1`
+	_, err := r.pool.Exec(ctx, query, peerID, status)
+	return err
+}
+
+// GetAllNodes retorna todos os nós registrados (para initial sync)
+func (r *NodeRepository) GetAllNodes(ctx context.Context) ([]*domain.NodeIdentity, error) {
+	query := `SELECT node_id, public_key FROM nodes`
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []*domain.NodeIdentity
+	for rows.Next() {
+		var n domain.NodeIdentity
+		if err := rows.Scan(&n.NodeID, &n.PublicKey); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, &n)
+	}
+	return nodes, nil
 }

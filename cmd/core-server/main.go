@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
 
 	"github.com/goautomatik/core-server/internal/config"
 	"github.com/goautomatik/core-server/internal/crypto"
@@ -91,6 +92,25 @@ func main() {
 
 	// Inicializa e inicia o servidor gRPC
 	grpcServer := server.NewGRPCServer(cfg, nodeService, modService, authInterceptor, healthChecker)
+
+	// Registrar Channel Service usando hook (que criaremos a seguir)
+	channelServer := server.NewChannelServer(nodeService)
+	gridServer := server.NewGridServer()
+
+	// Cluster Server (High Availability)
+	// Gerar peer ID a partir da config ou chave do servidor
+	selfPeerID := fmt.Sprintf("core-%d", cfg.GRPCPort)
+	selfAddress := fmt.Sprintf("127.0.0.1:%d", cfg.GRPCPort) // TODO: usar IP real em produção
+	clusterServer := server.NewClusterServer(pgRepo, selfPeerID, selfAddress, nil)
+
+	// Conectar callback de broadcast ao NodeService
+	nodeService.ClusterBroadcastCallback = clusterServer.BroadcastNodeRegistration
+
+	grpcServer.RegisterExtraService(func(s *grpc.Server) {
+		server.RegisterChannelService(s, channelServer)
+		server.RegisterGridService(s, gridServer)
+		clusterServer.Register(s)
+	})
 
 	// Canal para capturar sinais de shutdown
 	sigChan := make(chan os.Signal, 1)

@@ -24,6 +24,9 @@ type NodeService struct {
 	pgRepo       *postgres.NodeRepository
 	heartbeatTTL time.Duration
 	maxRelays    int
+
+	// Callback para broadcast de novos registros para cluster peers
+	ClusterBroadcastCallback func(ctx context.Context, nodeID string, publicKey []byte)
 }
 
 // NewNodeService cria um novo serviço de nós
@@ -89,6 +92,11 @@ func (s *NodeService) RegisterNode(ctx context.Context, reg *domain.NodeRegistra
 	suggestedRelays, err := s.redisManager.GetActiveRelays(ctx, reg.Region, s.maxRelays, nil)
 	if err != nil {
 		suggestedRelays = []*domain.Node{}
+	}
+
+	// Hook: Broadcast para cluster peers (Alta Disponibilidade)
+	if s.ClusterBroadcastCallback != nil {
+		go s.ClusterBroadcastCallback(ctx, node.Identity.NodeID, node.Identity.PublicKey)
 	}
 
 	return node, suggestedRelays, nil
@@ -160,4 +168,9 @@ func (s *NodeService) RemoveNode(ctx context.Context, nodeID string) error {
 // GetNodeStats retorna estatísticas dos nós
 func (s *NodeService) GetNodeStats(ctx context.Context) (map[domain.NodeType]int, error) {
 	return s.redisManager.GetNodeCount(ctx)
+}
+
+// LogGovernanceAction registra uma ação de governança auditada
+func (s *NodeService) LogGovernanceAction(ctx context.Context, requesterID, action, targetID, channelID string, signature []byte) error {
+	return s.pgRepo.LogGovernanceAction(ctx, requesterID, action, targetID, channelID, signature)
 }

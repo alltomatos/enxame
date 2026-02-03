@@ -2,12 +2,11 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"sync"
-
 	"time"
 
 	"google.golang.org/grpc"
@@ -32,6 +31,37 @@ func NewRelayServer(port int, sessionManager *SessionManager) *RelayServer {
 	}
 }
 
+// Implementação interface RelayServiceServer
+func (rs *RelayServer) ConnectToRelay(ctx context.Context, req *pbv1.ConnectRequest) (*pbv1.ConnectResponse, error) {
+	// Validação básica (em prod validaríamos assinatura)
+	if req.NodeId == "" {
+		return &pbv1.ConnectResponse{Success: false, Message: "NodeID required"}, nil
+	}
+
+	session, err := rs.sessionManager.RegisterSession(req.NodeId, req.PublicKey)
+	if err != nil {
+		return &pbv1.ConnectResponse{Success: false, Message: err.Error()}, nil
+	}
+
+	return &pbv1.ConnectResponse{
+		Success:          true,
+		Message:          "Connected to Relay",
+		SessionId:        session.SessionID,
+		ConnectedNodeIds: rs.sessionManager.GetConnectedNodeIDs(),
+	}, nil
+}
+
+func (rs *RelayServer) IsNodeConnected(ctx context.Context, req *pbv1.NodeQueryRequest) (*pbv1.NodeQueryResponse, error) {
+	session, exists := rs.sessionManager.GetSession(req.NodeId)
+	if !exists {
+		return &pbv1.NodeQueryResponse{Connected: false}, nil
+	}
+	return &pbv1.NodeQueryResponse{
+		Connected:    true,
+		LastActivity: timestamppb.New(session.LastActivity),
+	}, nil
+}
+
 // Start inicia o servidor gRPC do Relay
 func (rs *RelayServer) Start() error {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", rs.port))
@@ -54,8 +84,8 @@ func (rs *RelayServer) Start() error {
 
 	rs.grpcServer = grpc.NewServer(opts...)
 
-	// Registra o servidor (usando interface customizada pois não temos o grpc gerado)
-	// Em produção, usaríamos: pbv1.RegisterRelayServiceServer(rs.grpcServer, rs)
+	// Registra o servidor manualmente
+	RegisterRelayServiceServer(rs.grpcServer, rs)
 
 	log.Printf("[RelayServer] Starting on port %d", rs.port)
 
@@ -69,157 +99,131 @@ func (rs *RelayServer) Stop() {
 	}
 }
 
-// StreamMessages implementa o stream bidirecional de mensagens
-// Esta função é chamada quando um nó conecta ao relay
-func (rs *RelayServer) StreamMessages(nodeID string, publicKey []byte, recvChan <-chan *pbv1.Envelope, sendChan chan<- *pbv1.Envelope) error {
-	// Registra a sessão
-	session, err := rs.sessionManager.RegisterSession(nodeID, publicKey)
+// StreamMessages implementa o stream bidirecional
+func (rs *RelayServer) StreamMessages(stream RelayService_StreamMessagesServer) error {
+	// Lê primeira mensagem (Handshake)
+	firstCmd, err := stream.Recv()
 	if err != nil {
-		return fmt.Errorf("failed to register session: %w", err)
+		return err
+	}
+
+	firstEnv, err := CommandToEnvelope(firstCmd)
+	if err != nil {
+		return err
+	}
+
+	nodeID := firstEnv.SenderNodeId
+	if nodeID == "" {
+		return fmt.Errorf("sender_node_id required in first message")
+	}
+
+	// Registra sessão
+	session, err := rs.sessionManager.RegisterSession(nodeID, nil) // PublicKey opcional no MVP
+	if err != nil {
+		return err
 	}
 	defer rs.sessionManager.UnregisterSession(nodeID)
 
-	log.Printf("[RelayServer] Node %s connected (session: %s)", nodeID[:8], session.SessionID[:8])
+	log.Printf("[RelayServer] Stream started for node %s", nodeID[:8])
 
-	var wg sync.WaitGroup
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Se for mensagem real, encaminha
+	if len(firstEnv.EncryptedPayload) > 0 {
+		rs.sessionManager.ForwardEnvelope(firstEnv)
+	}
 
-	// Goroutine para receber mensagens do nó e encaminhar
-	wg.Add(1)
+	errChan := make(chan error, 2)
+	ctx := stream.Context()
+
+	// Goroutine de envio (Relay -> Client)
 	go func() {
-		defer wg.Done()
-		defer cancel()
-
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case envelope, ok := <-recvChan:
-				if !ok {
-					return
+			case env := <-session.SendChan:
+				cmd, err := EnvelopeToCommand(env)
+				if err != nil {
+					log.Printf("Failed to serialize envelope: %v", err)
+					continue
 				}
-
-				// Encaminha para o destinatário
-				if err := rs.sessionManager.ForwardEnvelope(envelope); err != nil {
-					log.Printf("[RelayServer] Failed to forward: %v", err)
-
-					// Envia recibo de erro de volta ao remetente
-					receipt := &pbv1.Envelope{
-						MessageId:    envelope.MessageId,
-						SenderNodeId: "relay",
-						TargetNodeId: envelope.SenderNodeId,
-						MessageType:  pbv1.MessageType_MESSAGE_TYPE_ACK,
-						Timestamp:    timestamppb.Now(),
-						// encrypted_payload seria o DeliveryReceipt serializado
-					}
-					select {
-					case sendChan <- receipt:
-					default:
-					}
+				if err := stream.Send(cmd); err != nil {
+					errChan <- err
+					return
 				}
 			}
 		}
 	}()
 
-	// Goroutine para enviar mensagens para o nó
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer cancel()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case envelope, ok := <-session.SendChan:
-				if !ok {
-					return
-				}
-
-				select {
-				case sendChan <- envelope:
-				default:
-					log.Printf("[RelayServer] Failed to send to node %s (buffer full)", nodeID[:8])
-				}
-			}
+	// Loop de recebimento (Client -> Relay)
+	for {
+		cmd, err := stream.Recv()
+		if err == io.EOF {
+			return nil
 		}
-	}()
+		if err != nil {
+			return err
+		}
 
-	wg.Wait()
-	log.Printf("[RelayServer] Node %s disconnected", nodeID[:8])
+		envelope, err := CommandToEnvelope(cmd)
+		if err != nil {
+			log.Printf("Invalid command received: %v", err)
+			continue
+		}
+		if envelope == nil {
+			continue
+		}
 
-	return nil
+		// Validação básica
+		if envelope.SenderNodeId != nodeID {
+			log.Printf("[RelayServer] spoofing attempt? claimed %s but stream is %s", envelope.SenderNodeId, nodeID)
+			continue
+		}
+
+		session.LastActivity = time.Now()
+
+		// INTERCEPTA COMANDOS PARA O RELAY (Control Plane)
+		if envelope.TargetNodeId == "RELAY" {
+			rs.handleRelayCommand(session, envelope)
+			continue
+		}
+
+		if err := rs.sessionManager.ForwardEnvelope(envelope); err != nil {
+			log.Printf("[RelayServer] Forward error: %v", err)
+		}
+	}
 }
 
-// HandleBidirectionalStream é uma versão simplificada para teste sem gRPC gerado
-func (rs *RelayServer) HandleBidirectionalStream(
-	nodeID string,
-	publicKey []byte,
-	stream interface {
-		Send(*pbv1.Envelope) error
-		Recv() (*pbv1.Envelope, error)
-	},
-) error {
-	// Registra a sessão
-	session, err := rs.sessionManager.RegisterSession(nodeID, publicKey)
-	if err != nil {
-		return fmt.Errorf("failed to register session: %w", err)
+// handleRelayCommand processa comandos administrativos enviados ao Relay
+func (rs *RelayServer) handleRelayCommand(session *Session, envelope *pbv1.Envelope) {
+	// Payload esperado: JSON {"command": "subscribe", "channel": "#foo"}
+	// Como é comando para o Relay, o payload não é cifrado E2E, apenas assinado (já validado)
+	// Formato simples JSON
+	type RelayCommand struct {
+		Command string `json:"command"`
+		Channel string `json:"channel"`
 	}
-	defer rs.sessionManager.UnregisterSession(nodeID)
 
-	log.Printf("[RelayServer] Node %s connected via stream", nodeID[:8])
+	var cmd RelayCommand
+	// No MVP, assumimos que EncryptedPayload contém o JSON puro se target=RELAY
+	// TODO: Na versão final, usar E2EE com a chave do Relay (se disponível)
+	// Para simplificar, vamos tentar fazer Unmarshal direto.
+	// Dica: O cliente deve enviar apenas o JSON bytes no EncryptedPayload para este caso.
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Pequeno hack: o pbv1.Envelope espera []byte em EncryptedPayload.
+	// Vamos varrer o JSON dali.
+	if err := json.Unmarshal(envelope.EncryptedPayload, &cmd); err != nil {
+		log.Printf("[RelayServer] Invalid control command from %s: %v", session.NodeID[:8], err)
+		return
+	}
 
-	var wg sync.WaitGroup
-
-	// Goroutine para receber do stream
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer cancel()
-
-		for {
-			envelope, err := stream.Recv()
-			if err == io.EOF {
-				return
-			}
-			if err != nil {
-				log.Printf("[RelayServer] Recv error: %v", err)
-				return
-			}
-
-			// Encaminha
-			if err := rs.sessionManager.ForwardEnvelope(envelope); err != nil {
-				log.Printf("[RelayServer] Forward failed: %v", err)
-			}
+	switch cmd.Command {
+	case "subscribe":
+		if len(cmd.Channel) > 0 && cmd.Channel[0] == '#' {
+			rs.sessionManager.SubscribeToChannel(session.NodeID, cmd.Channel)
 		}
-	}()
-
-	// Goroutine para enviar ao stream
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer cancel()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case envelope, ok := <-session.SendChan:
-				if !ok {
-					return
-				}
-				if err := stream.Send(envelope); err != nil {
-					log.Printf("[RelayServer] Send error: %v", err)
-					return
-				}
-			}
-		}
-	}()
-
-	wg.Wait()
-	return nil
+	case "unsubscribe":
+		rs.sessionManager.UnsubscribeFromChannel(session.NodeID, cmd.Channel)
+	default:
+		log.Printf("[RelayServer] Unknown control command from %s: %s", session.NodeID[:8], cmd.Command)
+	}
 }

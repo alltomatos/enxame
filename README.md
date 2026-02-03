@@ -1,80 +1,68 @@
-# Core Server - Rede Social Descentralizada P2P
+# Enxame - Rede Social Descentralizada P2P 🐝
 
-Core Server em Go para orquestração de uma rede social descentralizada P2P.
+O **Enxame** é uma plataforma de comunicação descentralizada focada em privacidade, criptografia ponta-a-ponta (E2EE) e alta disponibilidade. O projeto utiliza uma arquitetura híbrida de Core Servers (orquestração), Relays (tráfego de mensagens) e Clientes Desktop (Wails/React).
 
-## Arquitetura
+## ✨ Principais Funcionalidades
 
-- **gRPC**: Comunicação entre Core, Relays e Desktop Clients
-- **Redis**: Estado em tempo real (heartbeats, presença, Pub/Sub)
-- **PostgreSQL**: Persistência de metadados e histórico
+- **Canais Criptografados**: Mensagens cifradas com AES-GCM e troca de chaves X25519.
+- **Identidade de Canal**: Suporte a avatars e sistema de gerenciamento de canais (incluindo o canal oficial `#Inicio`).
+- **Cluster Dinâmico (Alta Disponibilidade)**: Múltiplos Core Servers sincronizados com failover automático no cliente.
+- **Comunicação P2P**: Mensageria direta e em grupo via rede de relays descentralizada.
+- **Módulos Integrados**: Wiki colaborativa, Tópicos (Tags) e compartilhamento de arquivos chunked.
+- **Grid Computing**: Sistema de processamento distribuído entre nós da rede.
 
-## Primeiros Passos
+## 🏗️ Arquitetura
+
+- **gRPC**: Comunicação principal entre todos os componentes da malha.
+- **PostgreSQL**: Persistência de metadados, governança e logs de auditoria.
+- **Redis**: Estado em tempo real, presença de nós e barramento de eventos (Pub/Sub).
+- **Wails & React**: Interface desktop moderna e de alto desempenho.
+- **SQLite**: Persistência local no cliente para histórico e segredos.
+
+## 🚀 Como Iniciar
 
 ### Pré-requisitos
-
 - Go 1.22+
 - Docker e Docker Compose
-- protoc (Protocol Buffer Compiler)
+- Node.js & NPM (para o frontend)
+- Ferramentas gRPC instaladas
 
-### Instalando Ferramentas
+### Executando a Hidra (Cluster de Cores)
 
-```bash
-make tools
-```
+1. **Inicie a infraestrutura base**:
+   ```bash
+   docker-compose up -d
+   ```
 
-### Gerando Código Protobuf
+2. **Inicie o Core Primário**:
+   ```bash
+   go run ./cmd/core-server
+   ```
 
-```bash
-make proto
-```
+3. **Inicie o Cliente GUI**:
+   ```bash
+   cd cmd/gui
+   wails dev
+   ```
 
-### Iniciando o Ambiente de Desenvolvimento
+## 📂 Estrutura do Projeto
 
-```bash
-# Inicia toda a stack (Core Server + Postgres + Redis)
-make docker-up
+- `cmd/core-server/`: Orquestrador central da rede.
+- `cmd/gui/`: Cliente desktop desenvolvido em Wails/React.
+- `pkg/client_sdk/`: SDK em Go que abstrai toda a lógica de segurança, storage e rede para o cliente.
+- `relay/`: Servidor de tráfego de mensagens pura (Stateless).
+- `internal/server/`: Implementações manuais dos serviços gRPC (Cluster, Channel, Grid).
+- `pkg/storage/`: Camada de persistência local (SQLite) do SDK.
 
-# Ou, para rodar localmente (apenas infraestrutura)
-make docker-infra
-make run
-```
+## 🛠️ Configurações (Core Server)
 
-### Testando
+| Variável | Descrição |
+|----------|-----------|
+| `GRPC_PORT` | Porta do servidor gRPC (Padrão: 50051) |
+| `POSTGRES_HOST` | Host do banco de dados relacional |
+| `REDIS_HOST` | Host do banco de dados em memória |
+| `MASTER_PUBLIC_KEYS` | Chaves mestras de moderação (Admin Approval) |
 
-```bash
-# Lista serviços gRPC
-make grpc-list
+## ⚖️ Licença
 
-# Testa GetActiveRelays
-make grpc-test
-```
-
-## Estrutura do Projeto
-
-```
-├── api/proto/v1/         # Definições Protobuf
-├── cmd/core-server/      # Entrypoint
-├── internal/
-│   ├── config/           # Configurações
-│   ├── crypto/           # Validação de assinaturas Ed25519
-│   ├── domain/           # Entidades de domínio
-│   ├── repository/       # Camada de dados (Redis/Postgres)
-│   ├── server/           # Servidor gRPC
-│   └── service/          # Lógica de negócio
-├── pkg/pb/v1/            # Código Go gerado (protoc)
-└── scripts/              # Scripts auxiliares
-```
-
-## Variáveis de Ambiente
-
-| Variável | Padrão | Descrição |
-|----------|--------|-----------|
-| `GRPC_PORT` | 50051 | Porta do servidor gRPC |
-| `POSTGRES_HOST` | localhost | Host do PostgreSQL |
-| `REDIS_HOST` | localhost | Host do Redis |
-| `HEARTBEAT_TTL` | 60s | TTL dos heartbeats |
-| `MASTER_PUBLIC_KEYS` | - | Chaves públicas dos moderadores globais (hex) |
-
-## Licença
-
-MIT
+Este projeto está sob a licença MIT.

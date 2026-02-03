@@ -26,6 +26,9 @@ type SessionManager struct {
 	// Blacklist global sincronizada do Core Server
 	blacklist sync.Map
 
+	// Canais (Pub/Sub) - ChannelID -> sync.Map (Set of NodeIDs)
+	channels sync.Map
+
 	// Métricas
 	activeConnections int64
 	messagesRelayed   int64
@@ -94,8 +97,23 @@ func (sm *SessionManager) GetSession(nodeID string) (*Session, bool) {
 	}
 	return nil, false
 }
+func (sm *SessionManager) SubscribeToChannel(nodeID, channelID string) {
+	val, _ := sm.channels.LoadOrStore(channelID, &sync.Map{})
+	subscribers := val.(*sync.Map)
+	subscribers.Store(nodeID, true)
+	log.Printf("[SessionManager] Node %s subscribed to %s", nodeID[:8], channelID)
+}
 
-// ForwardEnvelope encaminha um envelope para o destinatário
+// UnsubscribeFromChannel remove um nó de um canal
+func (sm *SessionManager) UnsubscribeFromChannel(nodeID, channelID string) {
+	if val, ok := sm.channels.Load(channelID); ok {
+		subscribers := val.(*sync.Map)
+		subscribers.Delete(nodeID)
+		log.Printf("[SessionManager] Node %s unsubscribed from %s", nodeID[:8], channelID)
+	}
+}
+
+// ForwardEnvelope encaminha um envelope para o destinatário ou broadcast
 func (sm *SessionManager) ForwardEnvelope(envelope *pbv1.Envelope) error {
 	// Verifica se o remetente está na blacklist
 	if sm.IsBlacklisted(envelope.SenderNodeId) {
@@ -103,6 +121,12 @@ func (sm *SessionManager) ForwardEnvelope(envelope *pbv1.Envelope) error {
 		return ErrNodeBlacklisted
 	}
 
+	// BROADCAST: Se TargetNodeId começa com '#', é um canal
+	if len(envelope.TargetNodeId) > 0 && envelope.TargetNodeId[0] == '#' {
+		return sm.broadcastEnvelope(envelope)
+	}
+
+	// 1-to-1
 	// Busca a sessão do destinatário
 	targetSession, exists := sm.GetSession(envelope.TargetNodeId)
 	if !exists {
@@ -110,19 +134,65 @@ func (sm *SessionManager) ForwardEnvelope(envelope *pbv1.Envelope) error {
 		return ErrTargetNotConnected
 	}
 
-	// Encaminha para o canal do destinatário
+	return sm.sendToSession(targetSession, envelope)
+}
+
+// broadcastEnvelope envia mensagem para todos os inscritos no canal
+func (sm *SessionManager) broadcastEnvelope(envelope *pbv1.Envelope) error {
+	channelID := envelope.TargetNodeId
+	val, ok := sm.channels.Load(channelID)
+	if !ok {
+		log.Printf("[SessionManager] ⚠️ Channel %s has no subscribers or does not exist", channelID)
+		return nil // Não é erro, só ninguém ouvindo
+	}
+
+	subscribers := val.(*sync.Map)
+	count := 0
+	subscribers.Range(func(key, value interface{}) bool {
+		targetNodeID := key.(string)
+
+		// Não enviar de volta para o remetente (Echo suppression)
+		if targetNodeID == envelope.SenderNodeId {
+			return true
+		}
+
+		if session, exists := sm.GetSession(targetNodeID); exists {
+			// Envia cópia (Best effort)
+			// TODO: Clone envelope se for modificar (aqui não modificamos)
+			select {
+			case session.SendChan <- envelope:
+				count++
+			default:
+				// Drop se buffer cheio
+			}
+		} else {
+			// Cleanup lazy: Se não tem sessão, remove da inscrição?
+			// Por enquanto mantemos, pois pode reconectar.
+		}
+		return true
+	})
+
+	sm.mu.Lock()
+	sm.messagesRelayed += int64(count) // Conta cada entrega como relayed
+	sm.mu.Unlock()
+
+	log.Printf("[SessionManager] 📢 Broadcast to %s delivered to %d nodes", channelID, count)
+	return nil
+}
+
+func (sm *SessionManager) sendToSession(session *Session, envelope *pbv1.Envelope) error {
 	select {
-	case targetSession.SendChan <- envelope:
+	case session.SendChan <- envelope:
 		sm.mu.Lock()
 		sm.messagesRelayed++
 		sm.mu.Unlock()
 
 		log.Printf("[SessionManager] ✉️ Forwarded message from %s to %s (type: %v)",
-			envelope.SenderNodeId[:8], envelope.TargetNodeId[:8], envelope.MessageType)
+			envelope.SenderNodeId[:8], session.NodeID[:8], envelope.MessageType)
 		return nil
 
 	default:
-		log.Printf("[SessionManager] ⚠️ Buffer full for node %s, dropping message", envelope.TargetNodeId[:8])
+		log.Printf("[SessionManager] ⚠️ Buffer full for node %s, dropping message", session.NodeID[:8])
 		return ErrBufferFull
 	}
 }
@@ -134,6 +204,9 @@ func (sm *SessionManager) AddToBlacklist(nodeID string) {
 
 	// Desconecta o nó se estiver conectado
 	sm.UnregisterSession(nodeID)
+
+	// Remove de todos os canais? (Opcional, mas boa prática)
+	// Implementação futura: iterar canais e remover.
 }
 
 // RemoveFromBlacklist remove um nó da blacklist

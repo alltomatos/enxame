@@ -30,6 +30,9 @@ type GRPCServer struct {
 
 	// Gerenciamento de streams ativos com sharding
 	streamManager *StreamManager
+
+	// Registradores extras
+	extraServices []func(*grpc.Server)
 }
 
 // NewGRPCServer cria um novo servidor gRPC
@@ -46,8 +49,17 @@ func NewGRPCServer(
 		modService:      modService,
 		authInterceptor: authInterceptor,
 		healthChecker:   healthChecker,
-		streamManager:   NewStreamManager(100), // Buffer de 100 eventos por stream
 	}
+}
+
+// RegisterExtraService permite registrar serviços adicionais antes do Start
+func (s *GRPCServer) RegisterExtraService(fn func(*grpc.Server)) {
+	s.extraServices = append(s.extraServices, fn)
+}
+
+// GetServer retorna a instância subjacente do grpc.Server
+func (s *GRPCServer) GetServer() *grpc.Server {
+	return s.grpcServer
 }
 
 // Start inicia o servidor gRPC
@@ -87,6 +99,11 @@ func (s *GRPCServer) Start(port string) error {
 
 	s.grpcServer = grpc.NewServer(opts...)
 	pbv1.RegisterNetworkServiceServer(s.grpcServer, s)
+
+	// Registra serviços extras
+	for _, reg := range s.extraServices {
+		reg(s.grpcServer)
+	}
 
 	// Registra Health Check (K8s liveness/readiness)
 	if s.healthChecker != nil {

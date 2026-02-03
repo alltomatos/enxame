@@ -577,25 +577,88 @@ test: add unit tests for NodeService
 
 ---
 
+---
+
+## Relay Service & Desktop Client
+
+### Arquitetura de Relay (P2P Mesh)
+
+O `RelayService` atua como uma ponte para nós que não possuem endereço IP público acessível (atrás de NAT).
+
+#### Protocolo de Transporte (`NodeCommand`)
+
+Devido a limitações de ambiente (ausência de `protoc` em runtime), implementamos um envelope de transporte genérico:
+
+```protobuf
+message NodeCommand {
+  string command_id = 1;
+  string command_type = 2; // "envelope", "control", etc.
+  bytes payload = 3;       // JSON encoded Envelope
+}
+```
+
+O fluxo de mensagens no stream bidirecional é:
+
+1. **Client -> Relay**: Envia `NodeCommand` contendo `Envelope`.
+2. **Relay**: Desserializa, verifica destino e encaminha (se conectado).
+3. **Relay -> Target**: Serializa `Envelope` em `NodeCommand` e envia.
+
+#### Handshake e Failover
+
+O Cliente Desktop implementa uma lógica robusta de conexão:
+
+1. **Descoberta**: Solicita lista de relays ao Core (`GetActiveRelays`).
+2. **Conexão**: Tenta conectar sequencialmente aos relays da lista.
+3. **Handshake**: Envia primeira mensagem de controle para registrar sessão.
+4. **Resiliência**: Se a conexão cai, seleciona automaticamente o próximo relay.
+
+---
+
+---
+
+## Desktop Client GUI (Wails)
+
+### Arquitetura de Dashboard Integrado
+Diferente do CLI, o cliente GUI utiliza um modelo de **Soberania em Tempo Real**:
+1.  **Acesso Offline**: O banco SQLite local é carregado imediatamente, permitindo leitura do histórico sem conexão ativa.
+2.  **Conexão Manual**: O usuário deve clicar em "Conectar" no `WelcomeDashboard` para iniciar o SDK.
+3.  **App Bridge**: O arquivo `app.go` expõe o `client_sdk` para o frontend React via Wails Bindings.
+
+### Configuração de Desenvolvimento
+- **Go Version**: Requer Go >= 1.24.
+- **Relay Local**: Para testar a conectividade localmente, o Relay deve ser iniciado com a variável `RELAY_IP`:
+  ```bash
+  cd relay && RELAY_IP=127.0.0.1 go run ./cmd/relay
+  ```
+
+---
+
 ## Roadmap Técnico
 
-### Fase 1 - MVP ✅
+### Fase 1 - MVP Core ✅
 - [x] Servidor gRPC básico
 - [x] Registro de nós
 - [x] Heartbeat com TTL
 - [x] Moderação global
 
-### Fase 2 - Robustez
-- [ ] Métricas Prometheus
-- [ ] Tracing distribuído (OpenTelemetry)
-- [ ] TLS em produção
-- [ ] Rate limiting por IP
+### Fase 2 - Integração Relay ✅
+- [x] Relay Server (StreamMessages)
+- [x] Desktop Client (CLI)
+- [x] Failover automático
+- [x] Teste de Fogo (Msg Delivery)
 
-### Fase 3 - Escala
-- [ ] Sharding de Redis
-- [ ] Read replicas PostgreSQL
-- [ ] Horizontal Pod Autoscaler
-- [ ] gRPC Load Balancing
+### Fase 3 - GUI & UX Avançada ✅
+- [x] Integrated Dashboard (React/Wails)
+- [x] Offline Reading Mode
+- [x] P2P File Sharing (Drag & Drop)
+- [x] Collaborative Topics (Tags)
+- [x] Channel Hub (Wiki/Video)
+
+### Fase 4 - Segurança & Robustez (Próximo)
+- [ ] Criptografia End-to-End (E2EE) com X25519
+- [ ] Assinatura estrita de Envelopes
+- [ ] Rotação de chaves de sessão
+- [ ] Métricas Prometheus & Tracing
 
 ---
 
