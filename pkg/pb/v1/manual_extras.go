@@ -322,7 +322,16 @@ type SyncNodesResponse struct {
 	Count   int32 `json:"count"`
 }
 
+// ClusterServiceServer Interface
+type ClusterServiceServer interface {
+	RequestJoin(context.Context, *RequestJoinRequest) (*RequestJoinResponse, error)
+	ApprovePeer(context.Context, *ApprovePeerRequest) (*ApprovePeerResponse, error)
+	GetClusterNodes(context.Context, *GetClusterNodesRequest) (*GetClusterNodesResponse, error)
+	SyncNodes(context.Context, *SyncNodesRequest) (*SyncNodesResponse, error)
+}
+
 // ClusterServiceClient Interface
+
 type ClusterServiceClient interface {
 	RequestJoin(ctx context.Context, in *RequestJoinRequest, opts ...grpc.CallOption) (*RequestJoinResponse, error)
 	ApprovePeer(ctx context.Context, in *ApprovePeerRequest, opts ...grpc.CallOption) (*ApprovePeerResponse, error)

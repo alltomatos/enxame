@@ -224,8 +224,9 @@ var _ interface {
 
 var _ClusterService_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "cluster.v1.ClusterService",
-	HandlerType: (*ClusterServer)(nil),
+	HandlerType: (*pbv1.ClusterServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+
 		{MethodName: "RequestJoin", Handler: _ClusterService_RequestJoin_Handler},
 		{MethodName: "ApprovePeer", Handler: _ClusterService_ApprovePeer_Handler},
 		{MethodName: "GetClusterNodes", Handler: _ClusterService_GetClusterNodes_Handler},
