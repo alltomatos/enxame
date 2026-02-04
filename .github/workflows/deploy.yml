@@ -39,37 +39,42 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy to VPS (K3s)
+    name: Deploy to VPS (Native SSH)
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Copy K8s Manifests to VPS
-        uses: appleboy/scp-action@master
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "k8s/"
-          target: "~/enxame-infra"
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
-      - name: Execute Deploy Script via SSH
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            # Aplicar todos os manifestos no namespace correto
+      - name: Add Host Key to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy Files (Native SCP)
+        run: |
+          # Cria a pasta antes para garantir
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p ~/enxame-infra/k8s"
+          # Copia os arquivos usando SCP nativo
+          scp -r k8s/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:~/enxame-infra/k8s/
+
+      - name: Apply Manifests (Native SSH)
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            # Aplica as configurações
             kubectl apply -f ~/enxame-infra/k8s/ -n enxame-system
             
-            # Atualizar imagem com o SHA do commit para garantir o rollout
+            # Força a atualização da imagem
             kubectl set image deployment/core-server core-server=ghcr.io/${{ github.repository_owner }}/enxame-core:${{ github.sha }} -n enxame-system
             
-            # Restart para garantir que o pod pegue novas configs se necessário
+            # Reinicia para pegar efeito
             kubectl rollout restart deployment/core-server -n enxame-system
             
-            # Monitorar status
-            kubectl rollout status deployment/core-server -n enxame-system
+            # Aguarda o sucesso
+            kubectl rollout status deployment/core-server -n enxame-system --timeout=60s
+          EOF
