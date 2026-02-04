@@ -28,6 +28,8 @@ spec:
         - name: postgres
           image: postgres:15-alpine
           env:
+            - name: POSTGRES_DB
+              value: "core_network"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
