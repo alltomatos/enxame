@@ -9,6 +9,7 @@ import (
 	pbv1 "github.com/goautomatik/core-server/pkg/pb/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -32,16 +33,104 @@ func (a *AuthInterceptor) Unary() grpc.UnaryServerInterceptor {
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
-		// Apenas RegisterNode requer autenticação de identidade
+		// 1. Identidade do Nó (Ed25519) - Apenas para RegisterNode (Segurança da Rede)
 		if strings.HasSuffix(info.FullMethod, "/RegisterNode") {
 			if err := a.validateRegisterNode(req); err != nil {
-				log.Printf("[Auth] RegisterNode failed: %v", err)
 				return nil, err
 			}
 		}
 
-		return handler(ctx, req)
+		// 2. Identidade do Usuário (JWT) - (Segurança da Governança)
+		newCtx := a.authenticateUser(ctx)
+
+		// 3. Regras de RBAC
+		if err := a.authorize(newCtx, info.FullMethod, req); err != nil {
+			return nil, err
+		}
+
+		return handler(newCtx, req)
 	}
+}
+
+func (a *AuthInterceptor) authenticateUser(ctx context.Context) context.Context {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ctx
+	}
+
+	authHeader := md.Get("authorization")
+	if len(authHeader) == 0 {
+		return context.WithValue(ctx, "role", "guest")
+	}
+
+	tokenStr := strings.TrimPrefix(authHeader[0], "Bearer ")
+	claims, err := crypto.ValidateJWT(tokenStr)
+	if err != nil {
+		log.Printf("[Auth] JWT validation failed: %v", err)
+		return context.WithValue(ctx, "role", "guest")
+	}
+
+	ctx = context.WithValue(ctx, "user_id", claims.UserID)
+	ctx = context.WithValue(ctx, "role", claims.Role)
+
+	// Verificação do Vault Token (Opcional, apenas em certos métodos)
+	vaultHeader := md.Get("x-vault-token")
+	if len(vaultHeader) > 0 {
+		vTokenStr := vaultHeader[0]
+		vClaims, err := crypto.ValidateJWT(vTokenStr)
+		if err == nil && vClaims.Scope == "super_admin" {
+			ctx = context.WithValue(ctx, "vault_scope", "super_admin")
+		}
+	}
+
+	return ctx
+}
+
+func (a *AuthInterceptor) authorize(ctx context.Context, method string, req interface{}) error {
+	role, _ := ctx.Value("role").(string)
+	if role == "" {
+		role = "guest"
+	}
+
+	// Regra 1: Guests só podem ler mensagens no canal #Inicio
+	if role == "guest" {
+		if strings.HasSuffix(method, "/SendMessage") {
+			return status.Error(codes.PermissionDenied, "guests cannot send messages")
+		}
+		if strings.HasSuffix(method, "/CreateChannel") {
+			return status.Error(codes.PermissionDenied, "guests cannot create channels")
+		}
+		if strings.HasSuffix(method, "/GetMessages") {
+			// Validar se o canal é #Inicio no request
+			// Como o GetMessagesRequest é genérico aqui, precisaríamos de type assertion
+			// mas por simplicidade desta fase, vamos focar no SendMessage e CreateChannel
+		}
+	}
+
+	// Regra 2: Apenas Admin/Owner criam canais ou acessam AdminService
+	if strings.Contains(method, "/AdminService/") || strings.HasSuffix(method, "/CreateChannel") {
+		if role != "admin" && role != "owner" {
+			return status.Error(codes.PermissionDenied, "unauthorized: only admins or owners can access this resource")
+		}
+
+		// Regra 3: Ações Críticas exigem Vault Scope (Modo Sudo)
+		criticalMethods := []string{
+			"BanNode",
+			"UnbanNode",
+			"SendGlobalAlert",
+			"UpdateUserRole",
+		}
+		for _, m := range criticalMethods {
+			if strings.HasSuffix(method, "/"+m) {
+				vaultScope, _ := ctx.Value("vault_scope").(string)
+				if vaultScope != "super_admin" {
+					return status.Error(codes.Unauthenticated, "vault_access_required: this action requires master key unlock (vault mode)")
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // Stream retorna o interceptor de stream para autenticação

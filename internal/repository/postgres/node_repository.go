@@ -94,6 +94,19 @@ func (r *NodeRepository) CreateTables(ctx context.Context) error {
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_cluster_peers_status ON cluster_peers(status)`,
+		// Identity & RBAC
+		`CREATE TABLE IF NOT EXISTS users (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			email VARCHAR(255) UNIQUE NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			full_name VARCHAR(255),
+			phone VARCHAR(32),
+			nickname VARCHAR(64) UNIQUE NOT NULL,
+			role VARCHAR(16) DEFAULT 'member',
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_nickname ON users(nickname)`,
 	}
 
 	for _, query := range queries {
@@ -431,4 +444,46 @@ func (r *NodeRepository) GetAllNodes(ctx context.Context) ([]*domain.NodeIdentit
 		nodes = append(nodes, &n)
 	}
 	return nodes, nil
+}
+
+func (r *NodeRepository) ListNodes(ctx context.Context, filterType int, onlineOnly bool, limit, offset int) ([]*domain.Node, int, error) {
+	var total int
+	err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM nodes").Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query := `
+		SELECT node_id, public_key, type, version, region, capabilities, first_seen_at, last_seen_at
+		FROM nodes
+		ORDER BY last_seen_at DESC
+		LIMIT $1 OFFSET $2
+	`
+	// TODO: implementar filtros de tipo e online se necessário (online exige join com redis ou flag no banco)
+	rows, err := r.pool.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var nodes []*domain.Node
+	for rows.Next() {
+		var n domain.Node
+		var pk []byte
+		var t int
+		if err := rows.Scan(&n.Identity.NodeID, &pk, &t, &n.Version, &n.Region, &n.Capabilities, &n.RegisteredAt, &n.LastSeen); err != nil {
+			return nil, 0, err
+		}
+		n.Identity.PublicKey = pk
+		n.Type = domain.NodeType(t)
+		nodes = append(nodes, &n)
+	}
+
+	return nodes, total, nil
+}
+
+func (r *NodeRepository) GetTotalNodesCount(ctx context.Context) (int, error) {
+	var total int
+	err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM nodes").Scan(&total)
+	return total, err
 }

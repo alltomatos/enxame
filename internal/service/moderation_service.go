@@ -183,16 +183,20 @@ func (s *ModerationService) PublishGlobalAlert(ctx context.Context, action *doma
 	}
 
 	// Propaga evento
+	return s.PublishInternalAlert(ctx, alert, action.Moderator.ModeratorID, action.Signature, action.CreatedAt)
+}
+
+// PublishInternalAlert envia um alerta sem validar assinatura de chave mestre (para uso interno do AdminServer)
+func (s *ModerationService) PublishInternalAlert(ctx context.Context, alert *domain.GlobalAlert, moderatorID string, signature []byte, signedAt time.Time) error {
 	event := &domain.ModerationEvent{
-		EventID:   generateEventID(),
+		EventID:   alert.AlertID,
 		Type:      domain.EventTypeGlobalAlert,
 		Timestamp: time.Now(),
 		Payload:   alert,
 		Signature: &domain.ModeratorSignature{
-			ModeratorID: action.Moderator.ModeratorID,
-			PublicKey:   action.Moderator.PublicKey,
-			Signature:   action.Signature,
-			SignedAt:    action.CreatedAt,
+			ModeratorID: moderatorID,
+			Signature:   signature,
+			SignedAt:    signedAt,
 		},
 	}
 

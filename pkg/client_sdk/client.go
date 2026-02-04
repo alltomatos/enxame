@@ -10,14 +10,18 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/goautomatik/core-server/pkg/crypto/e2e"
@@ -58,6 +62,8 @@ type MessageEvent struct {
 }
 
 type EventCallback func(event MessageEvent)
+
+type AuthCallback func(user *pbv1.User)
 
 type GridCallback func(status string, jobID string)
 
@@ -141,7 +147,11 @@ type EnxameClient struct {
 	onMessage    EventCallback
 	onGridStatus GridCallback
 	gridJobs     int
+	adminClient  pbv1.AdminServiceClient
+	updateClient pbv1.UpdateServiceClient
 	profile      string
+	authToken    string
+	vaultToken   string // Memória apenas
 }
 
 func NewEnxameClient(profile string) (*EnxameClient, error) {
@@ -193,6 +203,12 @@ func NewEnxameClient(profile string) (*EnxameClient, error) {
 	os.MkdirAll(c.storageDir, 0755)
 	os.MkdirAll(filepath.Join(c.storageDir, "chunks"), 0755)
 	os.MkdirAll(filepath.Join(c.storageDir, "downloads"), 0755)
+
+	// Carregar token de auth se existir no banco
+	savedToken, _ := store.GetConfig("auth_token")
+	if savedToken != "" {
+		c.authToken = savedToken
+	}
 
 	return c, nil
 }
@@ -252,6 +268,8 @@ func (c *EnxameClient) connectToCore() error {
 		c.coreConn = conn
 		c.coreClient = pbv1.NewNetworkServiceClient(conn)
 		c.channelServiceClient = pbv1.NewChannelServiceClient(conn)
+		c.adminClient = pbv1.NewAdminServiceClient(conn)
+		c.updateClient = pbv1.NewUpdateServiceClient(conn)
 		log.Printf("[SDK] Connected to core: %s", addr)
 
 		// Auto-discovery: atualizar lista de cores do cluster
@@ -1470,4 +1488,212 @@ func (c *EnxameClient) getChannelKey(channelID string) ([]byte, error) {
 		c.channelKeys[channelID] = k
 	}
 	return k, err
+}
+
+// -- AUTH METHODS --
+
+func (c *EnxameClient) withAuth(ctx context.Context) context.Context {
+	md := metadata.Pairs("authorization", "Bearer "+c.authToken)
+	if c.vaultToken != "" {
+		md.Set("x-vault-token", c.vaultToken)
+	}
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+func (c *EnxameClient) Register(email, password, fullName, phone, nickname string) (*pbv1.RegisterResponse, error) {
+	conn, err := c.getCoreConn()
+	if err != nil {
+		return nil, err
+	}
+
+	client := pbv1.NewAuthServiceClient(conn)
+	resp, err := client.Register(context.Background(), &pbv1.RegisterRequest{
+		Email:    email,
+		Password: password,
+		FullName: fullName,
+		Phone:    phone,
+		Nickname: nickname,
+	})
+
+	if err == nil && resp.Success {
+		c.authToken = resp.Token
+		c.storage.SetConfig("auth_token", resp.Token)
+	}
+
+	return resp, err
+}
+
+func (c *EnxameClient) Login(email, password string) (*pbv1.LoginResponse, error) {
+	conn, err := c.getCoreConn()
+	if err != nil {
+		return nil, err
+	}
+
+	client := pbv1.NewAuthServiceClient(conn)
+	resp, err := client.Login(context.Background(), &pbv1.LoginRequest{
+		Email:    email,
+		Password: password,
+	})
+
+	if err == nil && resp.Success {
+		c.authToken = resp.Token
+		c.storage.SetConfig("auth_token", resp.Token)
+	}
+
+	return resp, err
+}
+
+func (c *EnxameClient) GetMe() (*pbv1.GetMeResponse, error) {
+	conn, err := c.getCoreConn()
+	if err != nil {
+		return nil, err
+	}
+
+	client := pbv1.NewAuthServiceClient(conn)
+	return client.GetMe(c.withAuth(context.Background()), &pbv1.GetMeRequest{})
+}
+
+func (c *EnxameClient) Logout() {
+	c.authToken = ""
+	c.storage.SetConfig("auth_token", "")
+}
+
+// --- Admin Services ---
+
+func (c *EnxameClient) GetNetworkStats() (*pbv1.GetNetworkStatsResponse, error) {
+	return c.adminClient.GetNetworkStats(c.withAuth(context.Background()), &pbv1.GetNetworkStatsRequest{})
+}
+
+func (c *EnxameClient) ListNodes(filterType int, onlineOnly bool, limit, offset int) (*pbv1.ListNodesResponse, error) {
+	return c.adminClient.ListNodes(c.withAuth(context.Background()), &pbv1.ListNodesRequest{
+		FilterType: pbv1.NodeType(filterType),
+		OnlineOnly: onlineOnly,
+		Limit:      int32(limit),
+		Offset:     int32(offset),
+	})
+}
+
+func (c *EnxameClient) ListUsers(limit, offset int) (*pbv1.ListUsersResponse, error) {
+	return c.adminClient.ListUsers(c.withAuth(context.Background()), &pbv1.ListUsersRequest{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
+}
+
+func (c *EnxameClient) UpdateUserRole(userID, newRole string) (*pbv1.UpdateUserRoleResponse, error) {
+	return c.adminClient.UpdateUserRole(c.withAuth(context.Background()), &pbv1.UpdateUserRoleRequest{
+		UserId:  userID,
+		NewRole: newRole,
+	})
+}
+
+func (c *EnxameClient) BanNode(nodeID, reason string, durationSeconds int64) (*pbv1.BanNodeResponse, error) {
+	return c.adminClient.BanNode(c.withAuth(context.Background()), &pbv1.BanNodeRequest{
+		NodeId:          nodeID,
+		Reason:          reason,
+		DurationSeconds: durationSeconds,
+	})
+}
+
+func (c *EnxameClient) UnbanNode(nodeID string) (*pbv1.UnbanNodeResponse, error) {
+	return c.adminClient.UnbanNode(c.withAuth(context.Background()), &pbv1.UnbanNodeRequest{
+		NodeId: nodeID,
+	})
+}
+
+func (c *EnxameClient) SendGlobalAlert(title, message, severity, infoURL string) (*pbv1.SendGlobalAlertResponse, error) {
+	return c.adminClient.SendGlobalAlert(c.withAuth(context.Background()), &pbv1.SendGlobalAlertRequest{
+		Title:    title,
+		Message:  message,
+		Severity: severity,
+		InfoUrl:  infoURL,
+	})
+}
+
+func (c *EnxameClient) VerifyMasterKey(key string) (*pbv1.VerifyMasterKeyResponse, error) {
+	resp, err := c.adminClient.VerifyMasterKey(c.withAuth(context.Background()), &pbv1.VerifyMasterKeyRequest{
+		MasterKey: key,
+	})
+	if err == nil && resp.Success {
+		c.vaultToken = resp.VaultToken
+
+		// Autoclear after 30 mins
+		go func() {
+			time.Sleep(30 * time.Minute)
+			c.vaultToken = ""
+		}()
+	}
+	return resp, err
+}
+
+// Helper to get connection (internal use in SDK)
+func (c *EnxameClient) getCoreConn() (*grpc.ClientConn, error) {
+	if c.coreConn != nil {
+		return c.coreConn, nil
+	}
+	// Fallback to connect if needed
+	err := c.connectToCore()
+	return c.coreConn, err
+}
+
+func (c *EnxameClient) CheckForUpdate() (*pbv1.CheckForUpdateResponse, error) {
+	return c.updateClient.CheckForUpdate(c.withAuth(context.Background()), &pbv1.CheckForUpdateRequest{
+		CurrentVersion: "1.0.0", // TODO: usar constante global
+		Platform:       runtime.GOOS,
+	})
+}
+
+func (c *EnxameClient) DoUpdate(url string) error {
+	log.Printf("[Update] Initing update from %s", url)
+
+	// 1. Download
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(exePath)
+	downloadPath := filepath.Join(dir, "enxame.download")
+
+	out, err := os.Create(downloadPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return err
+	}
+	out.Close()
+
+	// 2. Swap (Atomic Rename)
+	oldPath := exePath + ".old"
+	_ = os.Remove(oldPath) // Limpa se já existir
+
+	if err := os.Rename(exePath, oldPath); err != nil {
+		return fmt.Errorf("failed to rename current exe: %w", err)
+	}
+
+	if err := os.Rename(downloadPath, exePath); err != nil {
+		// Rollback se falhar
+		os.Rename(oldPath, exePath)
+		return fmt.Errorf("failed to replace exe: %w", err)
+	}
+
+	// 3. Restart
+	log.Printf("[Update] Swap complete. Restarting...")
+	cmd := exec.Command(exePath)
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to restart: %w", err)
+	}
+
+	os.Exit(0)
+	return nil
 }
