@@ -245,3 +245,107 @@ var NetworkService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "network.proto",
 }
+
+const (
+	UpdateService_CheckForUpdate_FullMethodName = "/network.v1.UpdateService/CheckForUpdate"
+)
+
+// UpdateServiceClient is the client API for UpdateService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type UpdateServiceClient interface {
+	// Verifica se há uma nova versão disponível para a plataforma
+	CheckForUpdate(ctx context.Context, in *CheckForUpdateRequest, opts ...grpc.CallOption) (*CheckForUpdateResponse, error)
+}
+
+type updateServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewUpdateServiceClient(cc grpc.ClientConnInterface) UpdateServiceClient {
+	return &updateServiceClient{cc}
+}
+
+func (c *updateServiceClient) CheckForUpdate(ctx context.Context, in *CheckForUpdateRequest, opts ...grpc.CallOption) (*CheckForUpdateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckForUpdateResponse)
+	err := c.cc.Invoke(ctx, UpdateService_CheckForUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateServiceServer is the server API for UpdateService service.
+// All implementations must embed UnimplementedUpdateServiceServer
+// for forward compatibility.
+type UpdateServiceServer interface {
+	// Verifica se há uma nova versão disponível para a plataforma
+	CheckForUpdate(context.Context, *CheckForUpdateRequest) (*CheckForUpdateResponse, error)
+	mustEmbedUnimplementedUpdateServiceServer()
+}
+
+// UnimplementedUpdateServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedUpdateServiceServer struct{}
+
+func (UnimplementedUpdateServiceServer) CheckForUpdate(context.Context, *CheckForUpdateRequest) (*CheckForUpdateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckForUpdate not implemented")
+}
+func (UnimplementedUpdateServiceServer) mustEmbedUnimplementedUpdateServiceServer() {}
+func (UnimplementedUpdateServiceServer) testEmbeddedByValue()                       {}
+
+// UnsafeUpdateServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to UpdateServiceServer will
+// result in compilation errors.
+type UnsafeUpdateServiceServer interface {
+	mustEmbedUnimplementedUpdateServiceServer()
+}
+
+func RegisterUpdateServiceServer(s grpc.ServiceRegistrar, srv UpdateServiceServer) {
+	// If the following call panics, it indicates UnimplementedUpdateServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&UpdateService_ServiceDesc, srv)
+}
+
+func _UpdateService_CheckForUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckForUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UpdateServiceServer).CheckForUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UpdateService_CheckForUpdate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UpdateServiceServer).CheckForUpdate(ctx, req.(*CheckForUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// UpdateService_ServiceDesc is the grpc.ServiceDesc for UpdateService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var UpdateService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "network.v1.UpdateService",
+	HandlerType: (*UpdateServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CheckForUpdate",
+			Handler:    _UpdateService_CheckForUpdate_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "network.proto",
+}

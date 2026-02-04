@@ -1,37 +1,32 @@
-# Build stage
+# Build Stage
 FROM golang:1.24-alpine AS builder
-
-RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
-# Copia go.mod e go.sum primeiro (cache de dependências)
+# Instala dependências de build necessárias
+RUN apk add --no-cache git ca-certificates
+
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copia o código fonte
 COPY . .
 
-# Build otimizado
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s -extldflags '-static'" \
-    -o /core-server \
-    ./cmd/core-server
+# Compila o core-server
+RUN CGO_ENABLED=0 GOOS=linux go build -o core-server ./cmd/core-server/main.go
 
-# Final stage - imagem mínima
-FROM scratch
+# Run Stage
+FROM alpine:latest
 
-# Copia certificados CA e timezone
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+WORKDIR /app
 
-# Copia o binário
-COPY --from=builder /core-server /core-server
+# Instala ca-certificates para HTTPS
+RUN apk add --no-cache ca-certificates
 
-# Expõe a porta gRPC
+# Copia o binário do estágio de build
+COPY --from=builder /app/core-server .
+
+# Exponha a porta gRPC padrão do Enxame
 EXPOSE 50051
 
-# Executa como non-root (UID 1000)
-USER 1000:1000
-
-ENTRYPOINT ["/core-server"]
+# Comando de execução
+CMD ["./core-server"]

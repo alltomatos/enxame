@@ -382,3 +382,94 @@ func (c *clusterServiceClient) SyncNodes(ctx context.Context, in *SyncNodesReque
 	}
 	return out, nil
 }
+
+// -- AUTH SERVICE (Identity & RBAC) --
+
+type User struct {
+	Id       string `json:"id"`
+	Email    string `json:"email"`
+	FullName string `json:"full_name"`
+	Nickname string `json:"nickname"`
+	Role     string `json:"role"`
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Token   string `json:"token"`
+	User    *User  `json:"user"`
+}
+
+type RegisterRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	FullName string `json:"full_name"`
+	Phone    string `json:"phone"`
+	Nickname string `json:"nickname"`
+}
+
+type RegisterResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Token   string `json:"token"`
+	User    *User  `json:"user"`
+}
+
+type GetMeRequest struct{}
+
+type GetMeResponse struct {
+	Success bool  `json:"success"`
+	User    *User `json:"user"`
+}
+
+type AuthServiceClient interface {
+	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
+	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
+	GetMe(ctx context.Context, in *GetMeRequest, opts ...grpc.CallOption) (*GetMeResponse, error)
+}
+
+type AuthServiceServer interface {
+	Login(context.Context, *LoginRequest) (*LoginResponse, error)
+	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
+	GetMe(context.Context, *GetMeRequest) (*GetMeResponse, error)
+}
+
+type authServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAuthServiceClient(cc grpc.ClientConnInterface) AuthServiceClient {
+	return &authServiceClient{cc}
+}
+
+func (c *authServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+	out := new(LoginResponse)
+	err := c.cc.Invoke(ctx, "/auth.v1.AuthService/Login", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error) {
+	out := new(RegisterResponse)
+	err := c.cc.Invoke(ctx, "/auth.v1.AuthService/Register", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) GetMe(ctx context.Context, in *GetMeRequest, opts ...grpc.CallOption) (*GetMeResponse, error) {
+	out := new(GetMeResponse)
+	err := c.cc.Invoke(ctx, "/auth.v1.AuthService/GetMe", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}

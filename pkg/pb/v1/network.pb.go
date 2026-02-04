@@ -1529,6 +1529,126 @@ func (x *ModeratorSignature) GetSignedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type CheckForUpdateRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CurrentVersion string                 `protobuf:"bytes,1,opt,name=current_version,json=currentVersion,proto3" json:"current_version,omitempty"`
+	Platform       string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"` // "windows", "linux", "darwin"
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CheckForUpdateRequest) Reset() {
+	*x = CheckForUpdateRequest{}
+	mi := &file_network_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckForUpdateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckForUpdateRequest) ProtoMessage() {}
+
+func (x *CheckForUpdateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_network_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckForUpdateRequest.ProtoReflect.Descriptor instead.
+func (*CheckForUpdateRequest) Descriptor() ([]byte, []int) {
+	return file_network_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *CheckForUpdateRequest) GetCurrentVersion() string {
+	if x != nil {
+		return x.CurrentVersion
+	}
+	return ""
+}
+
+func (x *CheckForUpdateRequest) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+type CheckForUpdateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Available     bool                   `protobuf:"varint,1,opt,name=available,proto3" json:"available,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	Critical      bool                   `protobuf:"varint,4,opt,name=critical,proto3" json:"critical,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckForUpdateResponse) Reset() {
+	*x = CheckForUpdateResponse{}
+	mi := &file_network_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckForUpdateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckForUpdateResponse) ProtoMessage() {}
+
+func (x *CheckForUpdateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_network_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckForUpdateResponse.ProtoReflect.Descriptor instead.
+func (*CheckForUpdateResponse) Descriptor() ([]byte, []int) {
+	return file_network_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CheckForUpdateResponse) GetAvailable() bool {
+	if x != nil {
+		return x.Available
+	}
+	return false
+}
+
+func (x *CheckForUpdateResponse) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *CheckForUpdateResponse) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *CheckForUpdateResponse) GetCritical() bool {
+	if x != nil {
+		return x.Critical
+	}
+	return false
+}
+
 var File_network_proto protoreflect.FileDescriptor
 
 const file_network_proto_rawDesc = "" +
@@ -1636,7 +1756,15 @@ const file_network_proto_rawDesc = "" +
 	"\n" +
 	"public_key\x18\x02 \x01(\fR\tpublicKey\x12\x1c\n" +
 	"\tsignature\x18\x03 \x01(\fR\tsignature\x127\n" +
-	"\tsigned_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bsignedAt*z\n" +
+	"\tsigned_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bsignedAt\"\\\n" +
+	"\x15CheckForUpdateRequest\x12'\n" +
+	"\x0fcurrent_version\x18\x01 \x01(\tR\x0ecurrentVersion\x12\x1a\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\"~\n" +
+	"\x16CheckForUpdateResponse\x12\x1c\n" +
+	"\tavailable\x18\x01 \x01(\bR\tavailable\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12\x1a\n" +
+	"\bcritical\x18\x04 \x01(\bR\bcritical*z\n" +
 	"\bNodeType\x12\x19\n" +
 	"\x15NODE_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11NODE_TYPE_DESKTOP\x10\x01\x12\x13\n" +
@@ -1661,7 +1789,9 @@ const file_network_proto_rawDesc = "" +
 	"\fRegisterNode\x12\x1f.network.v1.RegisterNodeRequest\x1a .network.v1.RegisterNodeResponse\x12H\n" +
 	"\tHeartbeat\x12\x1c.network.v1.HeartbeatRequest\x1a\x1d.network.v1.HeartbeatResponse\x12Z\n" +
 	"\x0fGetActiveRelays\x12\".network.v1.GetActiveRelaysRequest\x1a#.network.v1.GetActiveRelaysResponse\x12R\n" +
-	"\x17SubscribeToGlobalEvents\x12\x1c.network.v1.SubscribeRequest\x1a\x17.network.v1.GlobalEvent0\x01B3Z1github.com/goautomatik/core-server/pkg/pb/v1;pbv1b\x06proto3"
+	"\x17SubscribeToGlobalEvents\x12\x1c.network.v1.SubscribeRequest\x1a\x17.network.v1.GlobalEvent0\x012h\n" +
+	"\rUpdateService\x12W\n" +
+	"\x0eCheckForUpdate\x12!.network.v1.CheckForUpdateRequest\x1a\".network.v1.CheckForUpdateResponseB3Z1github.com/goautomatik/core-server/pkg/pb/v1;pbv1b\x06proto3"
 
 var (
 	file_network_proto_rawDescOnce sync.Once
@@ -1676,7 +1806,7 @@ func file_network_proto_rawDescGZIP() []byte {
 }
 
 var file_network_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_network_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_network_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_network_proto_goTypes = []any{
 	(NodeType)(0),                   // 0: network.v1.NodeType
 	(NodeStatus)(0),                 // 1: network.v1.NodeStatus
@@ -1699,14 +1829,16 @@ var file_network_proto_goTypes = []any{
 	(*RelayOfflineEvent)(nil),       // 18: network.v1.RelayOfflineEvent
 	(*NetworkUpdateEvent)(nil),      // 19: network.v1.NetworkUpdateEvent
 	(*ModeratorSignature)(nil),      // 20: network.v1.ModeratorSignature
-	(*timestamppb.Timestamp)(nil),   // 21: google.protobuf.Timestamp
+	(*CheckForUpdateRequest)(nil),   // 21: network.v1.CheckForUpdateRequest
+	(*CheckForUpdateResponse)(nil),  // 22: network.v1.CheckForUpdateResponse
+	(*timestamppb.Timestamp)(nil),   // 23: google.protobuf.Timestamp
 }
 var file_network_proto_depIdxs = []int32{
 	3,  // 0: network.v1.NodeInfo.identity:type_name -> network.v1.NodeIdentity
 	0,  // 1: network.v1.NodeInfo.type:type_name -> network.v1.NodeType
 	1,  // 2: network.v1.NodeInfo.status:type_name -> network.v1.NodeStatus
-	21, // 3: network.v1.NodeInfo.registered_at:type_name -> google.protobuf.Timestamp
-	21, // 4: network.v1.NodeInfo.last_seen:type_name -> google.protobuf.Timestamp
+	23, // 3: network.v1.NodeInfo.registered_at:type_name -> google.protobuf.Timestamp
+	23, // 4: network.v1.NodeInfo.last_seen:type_name -> google.protobuf.Timestamp
 	3,  // 5: network.v1.RegisterNodeRequest.identity:type_name -> network.v1.NodeIdentity
 	0,  // 6: network.v1.RegisterNodeRequest.type:type_name -> network.v1.NodeType
 	4,  // 7: network.v1.RegisterNodeResponse.suggested_relays:type_name -> network.v1.NodeInfo
@@ -1714,27 +1846,29 @@ var file_network_proto_depIdxs = []int32{
 	8,  // 9: network.v1.HeartbeatRequest.metrics:type_name -> network.v1.NodeMetrics
 	10, // 10: network.v1.HeartbeatResponse.pending_commands:type_name -> network.v1.NodeCommand
 	4,  // 11: network.v1.GetActiveRelaysResponse.relays:type_name -> network.v1.NodeInfo
-	21, // 12: network.v1.GetActiveRelaysResponse.updated_at:type_name -> google.protobuf.Timestamp
+	23, // 12: network.v1.GetActiveRelaysResponse.updated_at:type_name -> google.protobuf.Timestamp
 	2,  // 13: network.v1.SubscribeRequest.event_types:type_name -> network.v1.EventType
 	2,  // 14: network.v1.GlobalEvent.type:type_name -> network.v1.EventType
-	21, // 15: network.v1.GlobalEvent.timestamp:type_name -> google.protobuf.Timestamp
+	23, // 15: network.v1.GlobalEvent.timestamp:type_name -> google.protobuf.Timestamp
 	15, // 16: network.v1.GlobalEvent.node_banned:type_name -> network.v1.NodeBannedEvent
 	16, // 17: network.v1.GlobalEvent.content_banned:type_name -> network.v1.ContentBannedEvent
 	17, // 18: network.v1.GlobalEvent.global_alert:type_name -> network.v1.GlobalAlertEvent
 	18, // 19: network.v1.GlobalEvent.relay_offline:type_name -> network.v1.RelayOfflineEvent
 	19, // 20: network.v1.GlobalEvent.network_update:type_name -> network.v1.NetworkUpdateEvent
 	20, // 21: network.v1.GlobalEvent.moderator_signature:type_name -> network.v1.ModeratorSignature
-	21, // 22: network.v1.ModeratorSignature.signed_at:type_name -> google.protobuf.Timestamp
+	23, // 22: network.v1.ModeratorSignature.signed_at:type_name -> google.protobuf.Timestamp
 	5,  // 23: network.v1.NetworkService.RegisterNode:input_type -> network.v1.RegisterNodeRequest
 	7,  // 24: network.v1.NetworkService.Heartbeat:input_type -> network.v1.HeartbeatRequest
 	11, // 25: network.v1.NetworkService.GetActiveRelays:input_type -> network.v1.GetActiveRelaysRequest
 	13, // 26: network.v1.NetworkService.SubscribeToGlobalEvents:input_type -> network.v1.SubscribeRequest
-	6,  // 27: network.v1.NetworkService.RegisterNode:output_type -> network.v1.RegisterNodeResponse
-	9,  // 28: network.v1.NetworkService.Heartbeat:output_type -> network.v1.HeartbeatResponse
-	12, // 29: network.v1.NetworkService.GetActiveRelays:output_type -> network.v1.GetActiveRelaysResponse
-	14, // 30: network.v1.NetworkService.SubscribeToGlobalEvents:output_type -> network.v1.GlobalEvent
-	27, // [27:31] is the sub-list for method output_type
-	23, // [23:27] is the sub-list for method input_type
+	21, // 27: network.v1.UpdateService.CheckForUpdate:input_type -> network.v1.CheckForUpdateRequest
+	6,  // 28: network.v1.NetworkService.RegisterNode:output_type -> network.v1.RegisterNodeResponse
+	9,  // 29: network.v1.NetworkService.Heartbeat:output_type -> network.v1.HeartbeatResponse
+	12, // 30: network.v1.NetworkService.GetActiveRelays:output_type -> network.v1.GetActiveRelaysResponse
+	14, // 31: network.v1.NetworkService.SubscribeToGlobalEvents:output_type -> network.v1.GlobalEvent
+	22, // 32: network.v1.UpdateService.CheckForUpdate:output_type -> network.v1.CheckForUpdateResponse
+	28, // [28:33] is the sub-list for method output_type
+	23, // [23:28] is the sub-list for method input_type
 	23, // [23:23] is the sub-list for extension type_name
 	23, // [23:23] is the sub-list for extension extendee
 	0,  // [0:23] is the sub-list for field type_name
@@ -1758,9 +1892,9 @@ func file_network_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_network_proto_rawDesc), len(file_network_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_network_proto_goTypes,
 		DependencyIndexes: file_network_proto_depIdxs,

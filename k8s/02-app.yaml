@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-server-service
+  namespace: enxame-system
+spec:
+  type: LoadBalancer
+  selector:
+    app: core-server
+  ports:
+    - protocol: TCP
+      port: 50051
+      targetPort: 50051
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-server
+  namespace: enxame-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: core-server
+  template:
+    metadata:
+      labels:
+        app: core-server
+    spec:
+      containers:
+        - name: core-server
+          image: ghcr.io/alltomatos/enxame-core:latest # Ajustar se necessário
+          env:
+            - name: DB_HOST
+              value: postgres-service
+            - name: REDIS_HOST
+              value: redis-service
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: enxame-secrets
+                  key: DB_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: enxame-secrets
+                  key: JWT_SECRET
+            - name: ADMIN_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: enxame-secrets
+                  key: ADMIN_MASTER_KEY
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: enxame-secrets
+                  key: REDIS_PASSWORD
+          ports:
+            - containerPort: 50051
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
