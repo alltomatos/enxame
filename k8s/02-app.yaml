@@ -31,15 +31,26 @@ spec:
         - name: core-server
           image: ghcr.io/alltomatos/enxame-core:latest # Ajustar se necessário
           env:
-            - name: DB_HOST
+            - name: ENVIRONMENT
+              value: "production"
+            - name: POSTGRES_HOST
               value: postgres-service
-            - name: REDIS_HOST
-              value: redis-service
-            - name: DB_PASSWORD
+            - name: POSTGRES_USER
+              value: "postgres" # Padrão da imagem postgres:15-alpine no 01-db.yaml
+            - name: POSTGRES_DB
+              value: "core_network" # Valor default no config.go, ajustar se criou diferente no DB
+            - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: enxame-secrets
                   key: DB_PASSWORD
+            - name: REDIS_HOST
+              value: redis-service
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: enxame-secrets
+                  key: REDIS_PASSWORD
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -50,11 +61,6 @@ spec:
                 secretKeyRef:
                   name: enxame-secrets
                   key: ADMIN_MASTER_KEY
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: enxame-secrets
-                  key: REDIS_PASSWORD
           ports:
             - containerPort: 50051
           resources:
