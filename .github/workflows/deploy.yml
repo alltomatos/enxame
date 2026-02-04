@@ -66,10 +66,18 @@ jobs:
       - name: Apply Manifests (Native SSH)
         run: |
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
-            # Aplica as configurações
+            # Aplica as configurações (incluindo Postgres)
             kubectl apply -f ~/enxame-infra/k8s/ -n enxame-system
             
-            # Força a atualização da imagem
+            # Aguarda o Postgres subir para criar o banco
+            echo "Waiting for Postgres..."
+            kubectl rollout status deployment/postgres -n enxame-system --timeout=60s
+            
+            # Garante que o banco existe (Idempotente com || true)
+            echo "Ensuring database exists..."
+            kubectl exec -i -n enxame-system deploy/postgres -- psql -U postgres -c "CREATE DATABASE core_network;" || true
+
+            # Força a atualização da imagem do Core Server
             kubectl set image deployment/core-server core-server=ghcr.io/${{ github.repository_owner }}/enxame-core:${{ github.sha }} -n enxame-system
             
             # Reinicia para pegar efeito
