@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -48,11 +50,19 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// PostgresDSN retorna a string de conexão do PostgreSQL
+// PostgresDSN retorna a string de conexão do PostgreSQL de forma segura
 func (c *Config) PostgresDSN() string {
-	return "postgres://" + c.PostgresUser + ":" + c.PostgresPassword +
-		"@" + c.PostgresHost + ":" + strconv.Itoa(c.PostgresPort) +
-		"/" + c.PostgresDB + "?sslmode=" + c.PostgresSSL
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(c.PostgresUser, c.PostgresPassword),
+		Host:   fmt.Sprintf("%s:%d", c.PostgresHost, c.PostgresPort),
+		Path:   "/" + c.PostgresDB,
+	}
+	q := u.Query()
+	q.Set("sslmode", c.PostgresSSL)
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }
 
 // RedisAddr retorna o endereço do Redis

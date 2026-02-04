@@ -84,6 +84,10 @@ func main() {
 		verifier,
 	)
 
+	// Repositórios Extras
+	userRepo := postgres.NewUserRepository(pgPool)
+	authServer := server.NewAuthServer(userRepo)
+
 	// Inicializa interceptor de autenticação
 	authInterceptor := server.NewAuthInterceptor(verifier)
 
@@ -93,9 +97,12 @@ func main() {
 	// Inicializa e inicia o servidor gRPC
 	grpcServer := server.NewGRPCServer(cfg, nodeService, modService, authInterceptor, healthChecker)
 
-	// Registrar Channel Service usando hook (que criaremos a seguir)
+	adminServer := server.NewAdminServer(nodeService, modService, userRepo, pgRepo)
+
+	// Registrar Channel Service usando hook
 	channelServer := server.NewChannelServer(nodeService)
 	gridServer := server.NewGridServer()
+	updateServer := server.NewUpdateServer()
 
 	// Cluster Server (High Availability)
 	// Gerar peer ID a partir da config ou chave do servidor
@@ -110,6 +117,9 @@ func main() {
 		server.RegisterChannelService(s, channelServer)
 		server.RegisterGridService(s, gridServer)
 		clusterServer.Register(s)
+		authServer.RegisterGRPC(s)
+		adminServer.Register(s)
+		updateServer.Register(s)
 	})
 
 	// Canal para capturar sinais de shutdown
@@ -143,16 +153,7 @@ func main() {
 }
 
 func connectPostgres(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?sslmode=%s&pool_max_conns=%d",
-		cfg.PostgresUser,
-		cfg.PostgresPassword,
-		cfg.PostgresHost,
-		cfg.PostgresPort,
-		cfg.PostgresDB,
-		cfg.PostgresSSL,
-		cfg.PostgresPoolSize,
-	)
+	dsn := cfg.PostgresDSN()
 
 	poolConfig, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
